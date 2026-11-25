@@ -151,4 +151,5 @@ export const INVENTORY: InventoryEntry[] = [
   { sku: "NET-01", label: "Patchkabel", stock: 8 },
   { sku: "SW-08", label: "Switch, 8 Ports", stock: 2 },
   { sku: "US-01", label: "USB-C-Dock", stock: 3 },
+  { sku: "RO-02", label: "Router 4Port", stock: 2 },
 ];
