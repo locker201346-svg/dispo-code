@@ -9,6 +9,7 @@ Open your project in the [Lovable editor](https://lovable.dev) and keep building
 - **Ship faster**: describe what you want to build and Lovable handles the code.
 - **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
 - **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+Hallo hier ist ein Test
 
 ## Development
 
@@ -20,6 +21,18 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+## Standalone-Version (ohne Server)
+
+Die App lässt sich als einzelne HTML-Datei bauen, die man direkt im Browser öffnen kann –
+ohne Installation, ohne Server, auch offline.
+
+```sh
+npm run build:standalone
+```
+
+Ergebnis: `dist-standalone/dispo.html` – per Doppelklick öffnen oder weitergeben.
+Nach Änderungen am Code oder an den Daten muss die Datei neu gebaut werden.
 
 ## Built with
 
