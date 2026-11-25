@@ -1,6 +1,6 @@
 // Baut die App als einzelne HTML-Datei (dist-standalone/dispo.html),
 // die ohne Server direkt per Doppelklick im Browser geöffnet werden kann.
-//   npm run build:standalone
+//   npm run build:standalone   → dispo.html (Version 1) und dispo-v2.html (Version 2)
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Fügt JS und CSS direkt in die HTML-Datei ein (keine externen Dateien nötig).
-function inlineAll(): Plugin {
+function inlineAll(outName: string): Plugin {
   return {
     name: "inline-all",
     enforce: "post",
@@ -40,22 +40,30 @@ function inlineAll(): Plugin {
       }
 
       html.source = src;
-      html.fileName = "dispo.html";
+      html.fileName = outName;
     },
   };
 }
 
-export default defineConfig({
-  root: fileURLToPath(new URL("./standalone", import.meta.url)),
-  base: "./",
-  plugins: [react(), tailwindcss(), inlineAll()],
-  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
-  build: {
-    outDir: fileURLToPath(new URL("./dist-standalone", import.meta.url)),
-    emptyOutDir: true,
-    assetsInlineLimit: 100_000_000,
-    cssCodeSplit: false,
-    modulePreload: false,
-    rollupOptions: { output: { format: "iife" } },
-  },
+// --mode v2 baut Version 2, sonst Version 1
+export default defineConfig(({ mode }) => {
+  const v2 = mode === "v2";
+  const root = fileURLToPath(new URL("./standalone", import.meta.url));
+  return {
+    root,
+    base: "./",
+    plugins: [react(), tailwindcss(), inlineAll(v2 ? "dispo-v2.html" : "dispo.html")],
+    resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+    build: {
+      outDir: fileURLToPath(new URL("./dist-standalone", import.meta.url)),
+      emptyOutDir: false,
+      assetsInlineLimit: 100_000_000,
+      cssCodeSplit: false,
+      modulePreload: false,
+      rollupOptions: {
+        input: `${root}/${v2 ? "index-v2.html" : "index.html"}`,
+        output: { format: "iife" },
+      },
+    },
+  };
 });
