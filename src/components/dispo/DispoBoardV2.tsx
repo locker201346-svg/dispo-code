@@ -7,6 +7,7 @@
  * - «Automatisch einplanen»: plant alle Aufträge ein, für die Material reicht
  * - Filter Alle / Planbar / Engpässe
  * - Einkaufsliste: welches Material für blockierte Aufträge fehlt
+ * - Einsätze mit Routenkarte (OpenStreetMap, Strecke über OSRM)
  * - Klickbares Menü: Übersicht, Aufträge (Tabelle), Lager, Mitarbeiter, Einsätze
  * - Hell/Dunkel-Modus
  * - Plan wird im Browser gespeichert und bleibt nach dem Neuladen erhalten
@@ -44,6 +45,8 @@ import {
 import { INVENTORY, ORDERS, type Order } from "@/data/dispo-data";
 import { demandFor, missingForOrder, shortagesFor, type Shortage } from "@/lib/dispo";
 import { cn } from "@/lib/utils";
+import { ORDER_GEO } from "@/data/dispo-geo";
+import { RouteMap, type MapStop } from "@/components/dispo/RouteMap";
 
 const DAY_START = 7 * 60 + 30; // 07:30
 const DAY_END = 16 * 60 + 30; // 16:30
@@ -166,6 +169,27 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
       return { order, start, end: cursor };
     });
   }, [plannedOrders]);
+  // Stopps für die Karte (nur Aufträge mit Koordinaten)
+  const mapStops = useMemo<MapStop[]>(
+    () =>
+      schedule.flatMap(({ order, start, end }) => {
+        const geo = ORDER_GEO[order.id];
+        if (!geo) return [];
+        return [
+          {
+            id: order.id,
+            title: order.title,
+            client: order.client,
+            address: `${order.street}, ${order.town}`,
+            lat: geo.lat,
+            lng: geo.lng,
+            approx: geo.approx ?? false,
+            time: `${clock(start)} – ${clock(end)}`,
+          },
+        ];
+      }),
+    [schedule],
+  );
   const workMinutes = plannedOrders.reduce((sum, order) => sum + order.minutes, 0);
   const dayEnd = schedule.at(-1)?.end ?? DAY_START;
   const usedMinutes = dayEnd - DAY_START;
@@ -1079,7 +1103,12 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
               </div>
             )}
 
-            {view === "Einsätze" && <div className="max-w-3xl">{scheduleCard}</div>}
+            {view === "Einsätze" && (
+              <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
+                <RouteMap stops={mapStops} />
+                {scheduleCard}
+              </div>
+            )}
 
             {view === "Mitarbeiter" && (
               <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center">
