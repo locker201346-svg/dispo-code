@@ -1,0 +1,260 @@
+[
+  {
+    "id": "A-101",
+    "client": "Atelier Linde",
+    "town": "Aarau",
+    "street": "Werkstrasse 12",
+    "title": "Netzwerk erweitern",
+    "minutes": 60,
+    "coords": [
+      47.392,
+      8.044
+    ],
+    "tasks": [
+      "Anschlüsse prüfen",
+      "Switch montieren",
+      "Verbindung testen"
+    ],
+    "items": [
+      {
+        "sku": "NET-01",
+        "label": "Patchkabel",
+        "qty": 3
+      },
+      {
+        "sku": "SW-08",
+        "label": "Switch, 8 Ports",
+        "qty": 1
+      }
+    ]
+  },
+  {
+    "id": "A-102",
+    "client": "Werkstatt Aare",
+    "town": "Buchs AG",
+    "street": "Hofweg 7",
+    "title": "Arbeitsplätze anschliessen",
+    "minutes": 90,
+    "coords": [
+      47.388,
+      8.078
+    ],
+    "tasks": [
+      "Leitungen beschriften",
+      "Arbeitsplätze verbinden"
+    ],
+    "items": [
+      {
+        "sku": "NET-01",
+        "label": "Patchkabel",
+        "qty": 4
+      },
+      {
+        "sku": "DO-02",
+        "label": "Anschlussdose",
+        "qty": 2
+      }
+    ]
+  },
+  {
+    "id": "A-103",
+    "client": "Forum Suhre",
+    "town": "Suhr",
+    "street": "Saalweg 3",
+    "title": "Saaltechnik prüfen",
+    "minutes": 45,
+    "coords": [
+      47.373,
+      8.082
+    ],
+    "tasks": [
+      "Bildsignal prüfen",
+      "Übergabe dokumentieren"
+    ],
+    "items": [
+      {
+        "sku": "HD-02",
+        "label": "HDMI-Kabel",
+        "qty": 2
+      }
+    ]
+  },
+  {
+    "id": "A-104",
+    "client": "Büro Farbwerk",
+    "town": "Aarau",
+    "street": "Gartenweg 8",
+    "title": "WLAN im Büro erweitern",
+    "minutes": 75,
+    "coords": [
+      47.388,
+      8.05
+    ],
+    "tasks": [
+      "Access Point montieren",
+      "WLAN testen"
+    ],
+    "items": [
+      {
+        "sku": "AP-01",
+        "label": "WLAN-Access-Point",
+        "qty": 1
+      },
+      {
+        "sku": "NET-01",
+        "label": "Patchkabel",
+        "qty": 3
+      }
+    ]
+  },
+  {
+    "id": "A-105",
+    "client": "Praxis Birke",
+    "town": "Gränichen",
+    "street": "Bachweg 11",
+    "title": "Empfangsdisplay montieren",
+    "minutes": 90,
+    "coords": [
+      47.36,
+      8.099
+    ],
+    "tasks": [
+      "Display befestigen",
+      "Signal prüfen"
+    ],
+    "items": [
+      {
+        "sku": "DS-01",
+        "label": "Display",
+        "qty": 1
+      },
+      {
+        "sku": "HW-04",
+        "label": "Wandhalterung",
+        "qty": 1
+      },
+      {
+        "sku": "HD-02",
+        "label": "HDMI-Kabel",
+        "qty": 1
+      }
+    ]
+  },
+  {
+    "id": "A-106",
+    "client": "Studio Wyna",
+    "town": "Unterkulm",
+    "street": "Mühleweg 5",
+    "title": "Arbeitsplätze einrichten",
+    "minutes": 60,
+    "coords": [
+      47.309,
+      8.114
+    ],
+    "tasks": [
+      "Dockingstationen anschliessen",
+      "Netzwerk prüfen"
+    ],
+    "items": [
+      {
+        "sku": "US-01",
+        "label": "USB-C-Dock",
+        "qty": 2
+      },
+      {
+        "sku": "NET-01",
+        "label": "Patchkabel",
+        "qty": 2
+      }
+    ]
+  },
+  {
+    "id": "A-107",
+    "client": "Werkhof West",
+    "town": "Schönenwerd",
+    "street": "Auenweg 4",
+    "title": "Netzwerkschrank erweitern",
+    "minutes": 120,
+    "coords": [
+      47.37,
+      8.0
+    ],
+    "tasks": [
+      "Switches einbauen",
+      "Ports prüfen"
+    ],
+    "items": [
+      {
+        "sku": "SW-08",
+        "label": "Switch, 8 Ports",
+        "qty": 2
+      },
+      {
+        "sku": "NET-01",
+        "label": "Patchkabel",
+        "qty": 6
+      }
+    ]
+  },
+  {
+    "id": "A-108",
+    "client": "Treffpunkt Rain",
+    "town": "Oberentfelden",
+    "street": "Rainweg 2",
+    "title": "Besprechungsraum ausstatten",
+    "minutes": 105,
+    "coords": [
+      47.356,
+      8.048
+    ],
+    "tasks": [
+      "Display montieren",
+      "Bildübertragung testen"
+    ],
+    "items": [
+      {
+        "sku": "DS-01",
+        "label": "Display",
+        "qty": 1
+      },
+      {
+        "sku": "HW-04",
+        "label": "Wandhalterung",
+        "qty": 1
+      },
+      {
+        "sku": "HD-02",
+        "label": "HDMI-Kabel",
+        "qty": 2
+      }
+    ]
+  },
+  {
+    "id": "A-109",
+    "client": "Atelier Erle",
+    "town": "Erlinsbach",
+    "street": "Haldenweg 3",
+    "title": "Funknetz ergänzen",
+    "minutes": 45,
+    "coords": [
+      47.4,
+      8.008
+    ],
+    "tasks": [
+      "Funkabdeckung prüfen",
+      "Access Point einrichten"
+    ],
+    "items": [
+      {
+        "sku": "AP-01",
+        "label": "WLAN-Access-Point",
+        "qty": 2
+      },
+      {
+        "sku": "NET-01",
+        "label": "Patchkabel",
+        "qty": 2
+      }
+    ]
+  }
+]
