@@ -34,6 +34,65 @@ type RouteState =
   | { status: "offline" };
 
 const OSRM_URL = "https://router.project-osrm.org/route/v1/driving/";
+const BASEMAP_KEY = "dispo-v2-basemap";
+
+const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+const SWISSTOPO_ATTR = '&copy; <a href="https://www.swisstopo.admin.ch/">swisstopo</a>';
+const CARTO_ATTR = `${OSM_ATTR} &copy; <a href="https://carto.com/attributions">CARTO</a>`;
+
+/** Verfügbares Kartenmaterial (alle frei nutzbar, ohne Anmeldung). */
+const BASEMAPS: {
+  name: string;
+  url: string;
+  attribution: string;
+  maxNativeZoom?: number;
+  /** Kachel der nächsthöheren Zoomstufe halb so gross anzeigen (kleinere Schrift). */
+  finer?: boolean;
+}[] = [
+  {
+    name: "OpenStreetMap",
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: OSM_ATTR,
+  },
+  {
+    name: "swisstopo Landeskarte",
+    url: "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg",
+    attribution: SWISSTOPO_ATTR,
+    maxNativeZoom: 18,
+    finer: true,
+  },
+  {
+    name: "swisstopo Luftbild",
+    url: "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/{z}/{x}/{y}.jpeg",
+    attribution: SWISSTOPO_ATTR,
+  },
+  {
+    name: "CARTO hell",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    attribution: CARTO_ATTR,
+  },
+  {
+    name: "CARTO dunkel",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+    attribution: CARTO_ATTR,
+  },
+];
+
+function readBasemap(): string {
+  try {
+    return window.localStorage.getItem(BASEMAP_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveBasemap(name: string) {
+  try {
+    window.localStorage.setItem(BASEMAP_KEY, name);
+  } catch {
+    /* nicht speicherbar – egal */
+  }
+}
 
 function km(meters: number) {
   return `${(meters / 1000).toFixed(1).replace(".", ",")} km`;
@@ -70,10 +129,24 @@ export function RouteMap({ stops }: { stops: MapStop[] }) {
         [DEPOT.lat, DEPOT.lng],
         12,
       );
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      }).addTo(map);
+      // Kartenmaterial zum Umschalten (oben rechts in der Karte)
+      const layers = Object.fromEntries(
+        BASEMAPS.map((b) => [
+          b.name,
+          L.tileLayer(b.url, {
+            maxZoom: 19,
+            maxNativeZoom: b.maxNativeZoom ?? 19,
+            ...(b.finer && { tileSize: 128, zoomOffset: 1 }),
+            subdomains: "abcd",
+            attribution: b.attribution,
+          }),
+        ]),
+      );
+      const savedName = readBasemap();
+      const initial = layers[savedName] ?? layers["OpenStreetMap"];
+      initial?.addTo(map);
+      L.control.layers(layers, undefined, { position: "topright" }).addTo(map);
+      map.on("baselayerchange", (event) => saveBasemap(event.name));
       layerRef.current = L.layerGroup().addTo(map);
       mapRef.current = map;
       setReady(true);
