@@ -1,4 +1,4 @@
-import { INVENTORY, ORDERS, type Order } from "@/data/dispo-data";
+import { INVENTORY, ORDERS, type InventoryEntry, type Order } from "@/data/dispo-data";
 
 export interface Shortage {
   sku: string;
@@ -6,6 +6,20 @@ export interface Shortage {
   needed: number;
   available: number;
   missing: number;
+}
+
+export interface ReorderItem {
+  sku: string;
+  label: string;
+  stock: number;
+  plannedDemand: number;
+  openDemand: number;
+  projectedStock: number;
+  minimumStock: number;
+  shortage: number;
+  quantity: number;
+  orders: string[];
+  status: "knapp" | "fehlt";
 }
 
 export function stockFor(sku: string): number {
@@ -60,6 +74,55 @@ export function missingForOrder(order: Order, planned: Order[]): Shortage[] {
     }
   }
   return missing;
+}
+
+/** Bedarf für geplante und offene Aufträge mit kleinem Mindestbestand puffern. */
+export function reorderListFor(
+  planned: Order[],
+  open: Order[],
+  inventory: InventoryEntry[] = INVENTORY,
+): ReorderItem[] {
+  const allOrders = [...planned, ...open];
+  const plannedDemand = demandFor(planned);
+  const openDemand = demandFor(open);
+  const catalog = new Map(inventory.map((entry) => [entry.sku, entry]));
+
+  for (const order of allOrders) {
+    for (const item of order.items) {
+      if (!catalog.has(item.sku)) {
+        catalog.set(item.sku, { sku: item.sku, label: item.label, stock: 0 });
+      }
+    }
+  }
+
+  return [...catalog.values()].flatMap((entry) => {
+    const plannedQty = plannedDemand.get(entry.sku) ?? 0;
+    const openQty = openDemand.get(entry.sku) ?? 0;
+    if (plannedQty + openQty === 0) return [];
+
+    const projectedStock = entry.stock - plannedQty - openQty;
+    const minimumStock = Math.max(1, Math.ceil(entry.stock * 0.2));
+
+    if (projectedStock >= minimumStock) return [];
+
+    return [
+      {
+        sku: entry.sku,
+        label: entry.label,
+        stock: entry.stock,
+        plannedDemand: plannedQty,
+        openDemand: openQty,
+        projectedStock,
+        minimumStock,
+        shortage: Math.max(0, -projectedStock),
+        quantity: minimumStock - projectedStock,
+        orders: allOrders
+          .filter((order) => order.items.some((item) => item.sku === entry.sku))
+          .map((order) => order.id),
+        status: projectedStock < 0 ? ("fehlt" as const) : ("knapp" as const),
+      },
+    ];
+  });
 }
 
 export function orderById(id: string): Order | undefined {

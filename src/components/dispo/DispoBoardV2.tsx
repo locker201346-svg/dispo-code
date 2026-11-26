@@ -6,7 +6,7 @@
  * - Zeitplan mit Uhrzeiten inkl. Fahrzeit, Reihenfolge per Pfeil änderbar
  * - «Automatisch einplanen»: plant alle Aufträge ein, für die Material reicht
  * - Filter Alle / Planbar / Engpässe
- * - Einkaufsliste: welches Material für blockierte Aufträge fehlt
+ * - Bestellliste: aggregierter Bedarf, Fehlmengen und Mindestbestandspuffer
  * - Einsätze mit Routenkarte (OpenStreetMap, Strecke über OSRM)
  * - Klickbares Menü: Übersicht, Aufträge (Tabelle), Lager, Mitarbeiter, Einsätze
  * - Hell/Dunkel-Modus
@@ -20,9 +20,11 @@ import {
   Boxes,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
   CircleMinus,
   CirclePlus,
   ClipboardList,
+  Copy,
   Clock,
   Gauge,
   History,
@@ -43,19 +45,45 @@ import {
 } from "lucide-react";
 
 import { INVENTORY, ORDERS, type Order } from "@/data/dispo-data";
-import { demandFor, missingForOrder, shortagesFor, type Shortage } from "@/lib/dispo";
+import {
+  demandFor,
+  missingForOrder,
+  reorderListFor,
+  shortagesFor,
+  type Shortage,
+} from "@/lib/dispo";
 import { cn } from "@/lib/utils";
 import { DEPOT, ORDER_GEO } from "@/data/dispo-geo";
 import { RouteMap, type MapStop } from "@/components/dispo/RouteMap";
+import { checkDailyPlan, estimatedWorkMinutes, MAX_SHIFT_MINUTES } from "@/lib/daily-plan-check";
 
 const DAY_START = 7 * 60 + 30; // 07:30
-const DAY_END = 16 * 60 + 30; // 16:30
+const DAY_END = DAY_START + MAX_SHIFT_MINUTES;
 const TRAVEL_MINUTES = 15; // Fahrzeit zwischen zwei Einsätzen
 const STORAGE_KEY = "dispo-v2-plan";
 const THEME_KEY = "dispo-v2-theme";
+const EMPLOYEE_STORAGE_KEY = "dispo-v2-employee";
+
+const EMPLOYEES = [
+  { id: "anna-keller", name: "Anna Keller", initials: "AK" },
+  { id: "luca-meier", name: "Luca Meier", initials: "LM" },
+  { id: "nina-huber", name: "Nina Huber", initials: "NH" },
+] as const;
+type EmployeeId = (typeof EMPLOYEES)[number]["id"];
+
+const DEFAULT_EMPLOYEE_ID: EmployeeId = EMPLOYEES[0].id;
+const DEFAULT_EMPLOYEE_AVAILABILITY: Record<EmployeeId, boolean> = {
+  "anna-keller": true,
+  "luca-meier": true,
+  "nina-huber": true,
+};
 
 type Filter = "alle" | "planbar" | "engpass";
 type View = "Übersicht" | "Aufträge" | "Lager" | "Mitarbeiter" | "Einsätze";
+
+function isEmployeeId(value: string): value is EmployeeId {
+  return EMPLOYEES.some((employee) => employee.id === value);
+}
 
 const NAV: { label: View; icon: typeof LayoutGrid }[] = [
   { label: "Übersicht", icon: LayoutGrid },
@@ -127,14 +155,25 @@ interface DispoBoardV2Props {
 
 export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
   const [plannedIds, setPlannedIds] = useState<string[]>([]);
-  const [rejection, setRejection] = useState<{ order: Order; missing: Shortage[] } | null>(null);
+  const [rejection, setRejection] = useState<{
+    order: Order;
+    missing: Shortage[];
+    reason?: string;
+  } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("alle");
   const [view, setView] = useState<View>("Übersicht");
   const [dark, setDark] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [employeeName, setEmployeeName] = useState("");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<EmployeeId>(DEFAULT_EMPLOYEE_ID);
+  const [employeeAvailability, setEmployeeAvailability] = useState<Record<EmployeeId, boolean>>(
+    DEFAULT_EMPLOYEE_AVAILABILITY,
+  );
+  const [hasRunChecks, setHasRunChecks] = useState(false);
+  const selectedEmployee =
+    EMPLOYEES.find((employee) => employee.id === selectedEmployeeId) ?? EMPLOYEES[0];
+  const employeeAvailable = employeeAvailability[selectedEmployee.id];
 
   // Gespeicherten Plan und Farbmodus erst nach dem ersten Rendern laden (SSR-sicher).
   useEffect(() => {
@@ -149,6 +188,47 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
         /* ungültige Daten ignorieren */
       }
     }
+    const savedEmployee = readStorage(EMPLOYEE_STORAGE_KEY);
+    if (savedEmployee) {
+      try {
+        const employee: unknown = JSON.parse(savedEmployee);
+        if (typeof employee === "object" && employee !== null) {
+          if (
+            "selectedEmployeeId" in employee &&
+            typeof employee.selectedEmployeeId === "string" &&
+            isEmployeeId(employee.selectedEmployeeId)
+          ) {
+            setSelectedEmployeeId(employee.selectedEmployeeId);
+          }
+          if (
+            "availability" in employee &&
+            typeof employee.availability === "object" &&
+            employee.availability !== null
+          ) {
+            const savedAvailability = employee.availability;
+            const nextAvailability = { ...DEFAULT_EMPLOYEE_AVAILABILITY };
+            for (const person of EMPLOYEES) {
+              const availability = Reflect.get(savedAvailability, person.id);
+              if (typeof availability === "boolean") {
+                nextAvailability[person.id] = availability;
+              }
+            }
+            setEmployeeAvailability(nextAvailability);
+          } else if ("available" in employee && typeof employee.available === "boolean") {
+            const savedName =
+              "name" in employee && typeof employee.name === "string" ? employee.name : "";
+            const legacyEmployee =
+              EMPLOYEES.find((person) => person.name === savedName) ?? EMPLOYEES[0];
+            setEmployeeAvailability((availability) => ({
+              ...availability,
+              [legacyEmployee.id]: employee.available,
+            }));
+          }
+        }
+      } catch {
+        /* Ungültige Mitarbeiterdaten ignorieren. */
+      }
+    }
     setDark(readStorage(THEME_KEY) === "dark");
     setLoaded(true);
   }, []);
@@ -160,6 +240,18 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
   useEffect(() => {
     if (loaded) writeStorage(THEME_KEY, dark ? "dark" : "light");
   }, [dark, loaded]);
+
+  useEffect(() => {
+    if (loaded) {
+      writeStorage(
+        EMPLOYEE_STORAGE_KEY,
+        JSON.stringify({
+          selectedEmployeeId,
+          availability: employeeAvailability,
+        }),
+      );
+    }
+  }, [employeeAvailability, loaded, selectedEmployeeId]);
 
   useEffect(() => {
     if (!toast) return;
@@ -176,6 +268,20 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
   );
   const demand = useMemo(() => demandFor(plannedOrders), [plannedOrders]);
   const shortages = useMemo(() => shortagesFor(plannedOrders), [plannedOrders]);
+  const planChecks = useMemo(
+    () =>
+      checkDailyPlan({
+        employeeName: selectedEmployee.name,
+        employeeAvailable,
+        orders: plannedOrders,
+        travelMinutes: TRAVEL_MINUTES,
+      }),
+    [employeeAvailable, plannedOrders, selectedEmployee.name],
+  );
+  const failedChecks = planChecks.filter((check) => check.status === "fail");
+  const attentionChecks = planChecks.filter(
+    (check) => check.status === "warning" || check.status === "pending",
+  );
 
   // Zeitplan: Startzeit jedes Einsatzes inkl. Fahrzeit davor
   const schedule = useMemo(() => {
@@ -216,6 +322,7 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
   const capacityPct = Math.min((usedMinutes / capacity) * 100, 100);
 
   const openOrders = ORDERS.filter((order) => !plannedIds.includes(order.id));
+  const openDemand = useMemo(() => demandFor(openOrders), [openOrders]);
   const missingByOrder = useMemo(
     () => new Map(openOrders.map((order) => [order.id, missingForOrder(order, plannedOrders)])),
     [openOrders, plannedOrders],
@@ -234,19 +341,10 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
     return matchesSearch;
   });
 
-  // Einkaufsliste: grösste Fehlmenge je Artikel über alle blockierten Aufträge
-  const shoppingList = useMemo(() => {
-    const list = new Map<string, { label: string; missing: number; orders: string[] }>();
-    for (const order of openOrders) {
-      for (const item of missingByOrder.get(order.id) ?? []) {
-        const entry = list.get(item.sku) ?? { label: item.label, missing: 0, orders: [] };
-        entry.missing = Math.max(entry.missing, item.missing);
-        entry.orders.push(order.id);
-        list.set(item.sku, entry);
-      }
-    }
-    return [...list.entries()].map(([sku, entry]) => ({ sku, ...entry }));
-  }, [openOrders, missingByOrder]);
+  const shoppingList = useMemo(
+    () => reorderListFor(plannedOrders, openOrders),
+    [openOrders, plannedOrders],
+  );
 
   const totalStock = INVENTORY.reduce((sum, entry) => sum + entry.stock, 0);
   const totalUsed = INVENTORY.reduce(
@@ -255,9 +353,29 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
   );
 
   function planOrder(order: Order) {
+    if (!employeeAvailable) {
+      setRejection({
+        order,
+        missing: [],
+        reason: `${selectedEmployee.name} ist heute als nicht verfügbar markiert.`,
+      });
+      return;
+    }
+
     const missing = missingForOrder(order, plannedOrders);
     if (missing.length > 0) {
       setRejection({ order, missing });
+      return;
+    }
+    const totalMinutes = estimatedWorkMinutes([...plannedOrders, order], TRAVEL_MINUTES);
+    if (totalMinutes > MAX_SHIFT_MINUTES) {
+      setRejection({
+        order,
+        missing: [],
+        reason:
+          `Dieser Auftrag würde die 9-Stunden-Grenze überschreiten. ` +
+          `Mit dem Auftrag wären ${formatMinutes(totalMinutes)} eingeplant.`,
+      });
       return;
     }
     setRejection(null);
@@ -283,11 +401,18 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
 
   function autoPlan() {
     setRejection(null);
+    if (!employeeAvailable) {
+      setToast("Mitarbeiter ist heute nicht verfügbar – keine Aufträge eingeplant");
+      return;
+    }
     const planned = [...plannedOrders];
     let added = 0;
     for (const order of ORDERS) {
       if (planned.some((p) => p.id === order.id)) continue;
-      if (missingForOrder(order, planned).length === 0) {
+      if (
+        missingForOrder(order, planned).length === 0 &&
+        estimatedWorkMinutes([...planned, order], TRAVEL_MINUTES) <= MAX_SHIFT_MINUTES
+      ) {
         planned.push(order);
         added++;
       }
@@ -296,7 +421,7 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
     setToast(
       added > 0
         ? `${added} Auftrag${added === 1 ? "" : "e"} automatisch eingeplant`
-        : "Kein weiterer Auftrag planbar – Material fehlt",
+        : "Kein weiterer Auftrag planbar – Material oder 9-Stunden-Limit",
     );
   }
 
@@ -304,6 +429,24 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
     setRejection(null);
     setPlannedIds([]);
     setToast("Plan zurückgesetzt");
+  }
+
+  async function copyReorderList() {
+    const lines = [
+      "SKU\tMaterial\tBestellmenge\tStatus\tAufträge",
+      ...shoppingList.map(
+        (item) =>
+          `${item.sku}\t${item.label}\t${item.quantity}\t${item.status}\t${item.orders.join(", ")}`,
+      ),
+    ];
+
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setToast("Bestellliste in die Zwischenablage kopiert");
+    } catch (error) {
+      console.error("Bestellliste konnte nicht kopiert werden", error);
+      setToast("Kopieren fehlgeschlagen – Bestellliste bitte direkt übernehmen");
+    }
   }
 
   function optimizeRoute() {
@@ -351,12 +494,12 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
     },
     {
       label: "Arbeitstag",
-      value: formatMinutes(workMinutes),
+      value: formatMinutes(usedMinutes),
       hint: overtime
         ? `Überzeit bis ${clock(dayEnd)}`
         : schedule.length > 0
-          ? `fertig ca. ${clock(dayEnd)}`
-          : `${clock(DAY_START)} – ${clock(DAY_END)}`,
+          ? `inkl. Fahrzeit · fertig ca. ${clock(dayEnd)}`
+          : `${clock(DAY_START)} – ${clock(DAY_END)} · max. 9 h`,
       icon: Gauge,
       tone: overtime ? ("warn" as const) : ("neutral" as const),
     },
@@ -497,13 +640,29 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
 
   const shoppingCard = (
     <section
-      aria-label="Einkaufsliste"
+      aria-label="Bestellliste"
       className="overflow-hidden rounded-xl border border-border bg-card"
     >
-      <div className="flex items-center gap-2 border-b border-border px-4 py-3.5">
-        <ShoppingCart className="h-5 w-5 text-muted-foreground" />
-        <h2 className="text-[16px] font-bold">Nachbestellen</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3.5">
+        <h2 className="flex items-center gap-2 text-[16px] font-bold">
+          <ShoppingCart className="h-5 w-5 text-muted-foreground" />
+          Bestellliste
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground">
+            {shoppingList.length}
+          </span>
+        </h2>
+        <button
+          onClick={copyReorderList}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition hover:bg-muted"
+        >
+          <Copy className="h-3.5 w-3.5" />
+          Liste kopieren
+        </button>
       </div>
+      <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
+        Bedarf aus geplanten und offenen Aufträgen. Mindestbestand: 1 Stück oder 20 % des
+        Lagerbestands.
+      </p>
       <ul className="divide-y divide-border px-4">
         {shoppingList.map((item) => (
           <li key={item.sku} className="flex items-center justify-between gap-3 py-2.5 text-sm">
@@ -512,10 +671,24 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                 {item.label}{" "}
                 <span className="font-mono text-[10px] text-muted-foreground">{item.sku}</span>
               </p>
-              <p className="text-xs text-muted-foreground">für {item.orders.join(", ")}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Bestand {item.stock} · Bedarf {item.plannedDemand} geplant + {item.openDemand} offen
+                <br />
+                {item.shortage > 0
+                  ? `${item.shortage} fehlen`
+                  : `Knapp: voraussichtlich ${item.projectedStock} Stück übrig`}{" "}
+                · Aufträge {item.orders.join(", ")}
+              </p>
             </div>
-            <span className="shrink-0 rounded-md bg-destructive/10 px-2 py-1 text-xs font-bold text-destructive">
-              +{item.missing}
+            <span
+              className={cn(
+                "shrink-0 rounded-md px-2 py-1 text-xs font-bold",
+                item.status === "fehlt"
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-warning/15 text-warning",
+              )}
+            >
+              {item.status === "fehlt" ? "Bestellen" : "Knapp"}: {item.quantity}×
             </span>
           </li>
         ))}
@@ -536,9 +709,13 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
         {INVENTORY.map((entry) => {
           const used = demand.get(entry.sku) ?? 0;
           const remaining = entry.stock - used;
-          const critical = remaining < 0;
-          const empty = !critical && remaining === 0 && used > 0;
-          const pct = entry.stock > 0 ? Math.min((used / entry.stock) * 100, 100) : 0;
+          const futureNeed = openDemand.get(entry.sku) ?? 0;
+          const projectedStock = remaining - futureNeed;
+          const reorder = shoppingList.find((item) => item.sku === entry.sku);
+          const critical = projectedStock < 0;
+          const low = reorder?.status === "knapp";
+          const pct =
+            entry.stock > 0 ? Math.min(((used + futureNeed) / entry.stock) * 100, 100) : 0;
           return (
             <li key={entry.sku} className="py-3">
               <div className="flex items-baseline justify-between gap-2 text-[13px]">
@@ -549,31 +726,42 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                 <span
                   className={cn(
                     "font-bold tabular-nums",
-                    critical ? "text-destructive" : empty ? "text-warning" : "",
+                    critical ? "text-destructive" : low ? "text-warning" : "",
                   )}
                 >
-                  {critical
-                    ? `${Math.abs(remaining)} fehlend`
-                    : `${remaining} / ${entry.stock} frei`}
+                  {`${remaining} / ${entry.stock} frei`}
                 </span>
               </div>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                {used} geplant + {futureNeed} für offene Aufträge
+              </p>
               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
                 <div
                   className={cn(
                     "h-full rounded-full transition-all duration-500",
-                    critical ? "bg-destructive" : empty ? "bg-warning" : "bg-success",
+                    critical ? "bg-destructive" : low ? "bg-warning" : "bg-success",
                   )}
-                  style={{ width: `${critical ? 100 : pct}%` }}
+                  style={{ width: `${pct}%` }}
                 />
               </div>
+              {reorder && (
+                <p
+                  className={cn(
+                    "mt-1 text-[11px] font-semibold",
+                    critical ? "text-destructive" : "text-warning",
+                  )}
+                >
+                  {critical
+                    ? `${Math.abs(projectedStock)} Stück fehlen – ${reorder.quantity} nachbestellen`
+                    : `Knapp: ${reorder.quantity} Stück zum Mindestbestand nachbestellen`}
+                </p>
+              )}
             </li>
           );
         })}
       </ul>
     </section>
   );
-
-  const openDemand = demandFor(openOrders);
 
   // Status eines Auftrags für die Ansicht «Aufträge»
   function statusOf(order: Order) {
@@ -674,9 +862,19 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                 >
                   {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 </button>
-                <div className="ml-1 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-sm font-bold text-muted-foreground">
-                  MH
-                </div>
+                <button
+                  onClick={() => setView("Mitarbeiter")}
+                  className="ml-1 inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-2.5 text-sm font-semibold transition hover:bg-muted"
+                  aria-label={`Mitarbeiter zuweisen: ${selectedEmployee.name}`}
+                  title="Mitarbeiter zuweisen"
+                >
+                  <UserRound className="h-4 w-4 text-muted-foreground" />
+                  <span className="hidden lg:inline">{selectedEmployee.name}</span>
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
+                    {selectedEmployee.initials}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                </button>
               </div>
             </div>
           </header>
@@ -761,6 +959,136 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
               ))}
             </div>
 
+            {view === "Übersicht" && (
+              <section
+                aria-label="Planprüfung"
+                aria-live="polite"
+                className={cn(
+                  "mb-6 overflow-hidden rounded-xl border bg-card",
+                  !hasRunChecks && "border-border",
+                  hasRunChecks &&
+                    (failedChecks.length > 0
+                      ? "border-destructive/30"
+                      : attentionChecks.length > 0
+                        ? "border-warning/35"
+                        : "border-success/30"),
+                )}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={cn(
+                        "flex h-9 w-9 items-center justify-center rounded-lg",
+                        !hasRunChecks && "bg-muted text-muted-foreground",
+                        hasRunChecks &&
+                          (failedChecks.length > 0
+                            ? "bg-destructive/10 text-destructive"
+                            : attentionChecks.length > 0
+                              ? "bg-warning/15 text-warning"
+                              : "bg-success/10 text-success"),
+                      )}
+                    >
+                      {hasRunChecks && failedChecks.length === 0 && attentionChecks.length === 0 ? (
+                        <CheckCircle2 className="h-5 w-5" />
+                      ) : (
+                        <AlertTriangle className="h-5 w-5" />
+                      )}
+                    </span>
+                    <div>
+                      <h2 className="text-sm font-bold">Tagesplan prüfen</h2>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Mitarbeiter, Material, Route und maximal 9 Stunden Arbeitszeit
+                        kontrollieren.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setHasRunChecks(true)}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-bold text-primary-foreground transition hover:opacity-90"
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    {hasRunChecks ? "Erneut prüfen" : "Prüfung starten"}
+                  </button>
+                </div>
+
+                {hasRunChecks && (
+                  <div className="border-t border-border">
+                    <div
+                      className={cn(
+                        "px-4 py-2.5 text-sm font-bold",
+                        failedChecks.length > 0
+                          ? "bg-destructive/6 text-destructive"
+                          : attentionChecks.length > 0
+                            ? "bg-warning/10 text-warning"
+                            : "bg-success/8 text-success",
+                      )}
+                    >
+                      {failedChecks.length > 0
+                        ? `Nicht einsatzbereit: ${failedChecks.length} Prüfung${failedChecks.length === 1 ? "" : "en"} fehlgeschlagen`
+                        : attentionChecks.length > 0
+                          ? "Prüfung abgeschlossen – Hinweise beachten"
+                          : "Alle Prüfungen bestanden – einsatzbereit"}
+                    </div>
+                    <ul className="grid gap-2 p-3 sm:grid-cols-2">
+                      {planChecks.map((check) => {
+                        const Icon =
+                          check.status === "pass"
+                            ? CheckCircle2
+                            : check.status === "pending"
+                              ? Clock
+                              : AlertTriangle;
+                        return (
+                          <li
+                            key={check.id}
+                            className={cn(
+                              "flex items-start gap-2.5 rounded-lg border p-3",
+                              check.status === "pass" && "border-success/20 bg-success/5",
+                              check.status === "fail" && "border-destructive/20 bg-destructive/5",
+                              check.status === "warning" && "border-warning/25 bg-warning/8",
+                              check.status === "pending" && "border-border bg-muted/40",
+                            )}
+                          >
+                            <Icon
+                              className={cn(
+                                "mt-0.5 h-4 w-4 shrink-0",
+                                check.status === "pass" && "text-success",
+                                check.status === "fail" && "text-destructive",
+                                check.status === "warning" && "text-warning",
+                                check.status === "pending" && "text-muted-foreground",
+                              )}
+                            />
+                            <div className="min-w-0">
+                              <p
+                                className={cn(
+                                  "text-xs font-bold",
+                                  check.status === "pass" && "text-success",
+                                  check.status === "fail" && "text-destructive",
+                                  check.status === "warning" && "text-warning",
+                                  check.status === "pending" && "text-muted-foreground",
+                                )}
+                              >
+                                {check.label} ·{" "}
+                                {check.status === "pass"
+                                  ? "OK"
+                                  : check.status === "fail"
+                                    ? "Fehler"
+                                    : check.status === "warning"
+                                      ? "Hinweis"
+                                      : "Offen"}
+                              </p>
+                              <p className="mt-1 text-xs leading-relaxed text-foreground/80">
+                                {check.message}
+                              </p>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </section>
+            )}
+
             {rejection && (
               <div
                 role="alert"
@@ -775,27 +1103,29 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                       Auftrag {rejection.order.id} kann nicht eingeplant werden
                     </h2>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Für diesen Auftrag reicht der Lagerbestand nicht aus.
+                      {rejection.reason ?? "Für diesen Auftrag reicht der Lagerbestand nicht aus."}
                     </p>
-                    <ul className="mt-3 space-y-1.5">
-                      {rejection.missing.map((item) => (
-                        <li
-                          key={item.sku}
-                          className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-destructive/20 bg-card px-3 py-2 text-sm"
-                        >
-                          <span className="font-mono text-xs font-semibold text-muted-foreground">
-                            {item.sku}
-                          </span>
-                          <span className="font-medium">{item.label}</span>
-                          <span className="ml-auto font-semibold text-destructive">
-                            {item.missing} Stück zu wenig
-                          </span>
-                          <span className="text-muted-foreground">
-                            (benötigt {item.needed}, verfügbar {item.available})
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+                    {rejection.missing.length > 0 && (
+                      <ul className="mt-3 space-y-1.5">
+                        {rejection.missing.map((item) => (
+                          <li
+                            key={item.sku}
+                            className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-destructive/20 bg-card px-3 py-2 text-sm"
+                          >
+                            <span className="font-mono text-xs font-semibold text-muted-foreground">
+                              {item.sku}
+                            </span>
+                            <span className="font-medium">{item.label}</span>
+                            <span className="ml-auto font-semibold text-destructive">
+                              {item.missing} Stück zu wenig
+                            </span>
+                            <span className="text-muted-foreground">
+                              (benötigt {item.needed}, verfügbar {item.available})
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                   <button
                     onClick={() => setRejection(null)}
@@ -1099,7 +1429,7 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                   className="overflow-hidden rounded-xl border border-border bg-card"
                 >
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[620px] text-sm">
+                    <table className="w-full min-w-[760px] text-sm">
                       <thead className="bg-muted/60 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         <tr>
                           <th className="px-4 py-3">Artikel</th>
@@ -1107,6 +1437,7 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                           <th className="px-4 py-3 text-right">Verplant</th>
                           <th className="px-4 py-3 text-right">Frei</th>
                           <th className="px-4 py-3 text-right">Bedarf offene Aufträge</th>
+                          <th className="px-4 py-3 text-right">Nachbestellen</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
@@ -1114,6 +1445,7 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                           const used = demand.get(entry.sku) ?? 0;
                           const free = entry.stock - used;
                           const openNeed = openDemand.get(entry.sku) ?? 0;
+                          const reorder = shoppingList.find((item) => item.sku === entry.sku);
                           return (
                             <tr key={entry.sku} className="transition hover:bg-muted/40">
                               <td className="px-4 py-3">
@@ -1143,6 +1475,23 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                                 )}
                               >
                                 {openNeed}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                {reorder ? (
+                                  <span
+                                    className={cn(
+                                      "font-semibold",
+                                      reorder.status === "fehlt"
+                                        ? "text-destructive"
+                                        : "text-warning",
+                                    )}
+                                  >
+                                    {reorder.status === "fehlt" ? "Fehlt" : "Knapp"} ·{" "}
+                                    {reorder.quantity} bestellen
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">–</span>
+                                )}
                               </td>
                             </tr>
                           );
@@ -1182,17 +1531,48 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                   </div>
                   <label className="mt-4 block">
                     <span className="mb-1.5 block text-xs font-bold text-muted-foreground">
-                      Mitarbeitername
+                      Mitarbeiter zuteilen
                     </span>
-                    <input
-                      value={employeeName}
-                      onChange={(event) => setEmployeeName(event.target.value)}
-                      placeholder="z. B. Marco H."
+                    <select
+                      value={selectedEmployeeId}
+                      onChange={(event) => {
+                        if (isEmployeeId(event.target.value)) {
+                          setSelectedEmployeeId(event.target.value);
+                        }
+                      }}
                       className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      {EMPLOYEES.map((employee) => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.name} · Demo-Mitarbeiter
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-muted/30 p-3">
+                    <input
+                      type="checkbox"
+                      checked={employeeAvailable}
+                      onChange={(event) =>
+                        setEmployeeAvailability((availability) => ({
+                          ...availability,
+                          [selectedEmployee.id]: event.target.checked,
+                        }))
+                      }
+                      className="mt-0.5 h-4 w-4 accent-[var(--brand)]"
                     />
+                    <span>
+                      <span className="block text-sm font-semibold">Heute verfügbar</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {employeeAvailable
+                          ? "Darf Einsätze für diesen Tag erhalten."
+                          : "Neue Einsätze werden für diesen Mitarbeiter blockiert."}
+                      </span>
+                    </span>
                   </label>
                   <p className="mt-3 text-xs text-muted-foreground">
-                    Der Name wird in der Tagesübersicht für die aktuelle Route verwendet.
+                    Der gesamte aktuelle Tagesplan wird dieser Person zugeteilt. Auswahl und
+                    Verfügbarkeit werden lokal in diesem Browser gespeichert.
                   </p>
                 </section>
 
@@ -1202,9 +1582,15 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
                       <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
                         Tagesroute
                       </p>
-                      <h2 className="mt-1 text-lg font-bold">
-                        {employeeName.trim() || "Mitarbeiter"}
-                      </h2>
+                      <h2 className="mt-1 text-lg font-bold">{selectedEmployee.name}</h2>
+                      <p
+                        className={cn(
+                          "mt-1 text-xs font-semibold",
+                          employeeAvailable ? "text-success" : "text-destructive",
+                        )}
+                      >
+                        {employeeAvailable ? "Verfügbar" : "Heute nicht verfügbar"}
+                      </p>
                     </div>
                     <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
                       {schedule.length} Einsätze
