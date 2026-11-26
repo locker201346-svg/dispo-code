@@ -11,6 +11,7 @@ import {
   Filter,
   LayoutGrid,
   MapPin,
+  Navigation,
   PackageX,
   RotateCcw,
   Search,
@@ -43,6 +44,7 @@ export function DispoBoard() {
   const [rejection, setRejection] = useState<{ order: Order; missing: Shortage[] } | null>(null);
   const [search, setSearch] = useState("");
   const [showBlockedOnly, setShowBlockedOnly] = useState(false);
+  const [employee, setEmployee] = useState("Mitarbeiter");
   const [activeNav, setActiveNav] = useState("Übersicht");
 
   const plannedOrders = useMemo(
@@ -52,6 +54,13 @@ export function DispoBoard() {
   const totalMinutes = plannedOrders.reduce((sum, order) => sum + order.minutes, 0);
   const demand = useMemo(() => demandFor(plannedOrders), [plannedOrders]);
   const shortages = useMemo(() => shortagesFor(plannedOrders), [plannedOrders]);
+  const routeOrders = useMemo(
+    () =>
+      [...plannedOrders].sort((first, second) =>
+        first.town.localeCompare(second.town, "de", { sensitivity: "base" }),
+      ),
+    [plannedOrders],
+  );
 
   function planOrder(order: Order) {
     const missing = missingForOrder(order, plannedOrders);
@@ -377,6 +386,68 @@ export function DispoBoard() {
                 <div className="border-t border-[#edf0f2] px-4 py-3 text-sm text-[#87929c]">
                   Gesamtdauer
                   <span className="float-right font-bold text-[#26343f]">{formatMinutes(totalMinutes)}</span>
+                </div>
+              )}
+            </section>
+
+            <section aria-label="Tagesroute" className="overflow-hidden rounded-xl border border-[#dde2e7] bg-white">
+              <div className="border-b border-[#edf0f2] px-4 py-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Navigation className="h-5 w-5 text-[#87929c]" />
+                    <h2 className="text-[16px] font-bold text-[#26343f]">Tagesroute</h2>
+                  </div>
+                  <span className="rounded-full bg-[#edf1f3] px-2.5 py-1 text-xs font-bold text-[#65727d]">
+                    {routeOrders.length} Stops
+                  </span>
+                </div>
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.1em] text-[#98a2aa]">
+                    Mitarbeiter
+                  </span>
+                  <input
+                    value={employee}
+                    onChange={(event) => setEmployee(event.target.value)}
+                    className="h-9 w-full rounded-lg border border-[#dde2e7] bg-[#fafbfb] px-3 text-sm font-semibold text-[#26343f] outline-none focus:border-[#aab5bd]"
+                  />
+                </label>
+              </div>
+
+              {routeOrders.length === 0 ? (
+                <p className="p-5 text-center text-sm text-[#87929c]">
+                  Aufträge einplanen, um die Route zu erstellen.
+                </p>
+              ) : (
+                <ol className="p-3">
+                  {routeOrders.map((order, index) => (
+                    <li key={order.id} className="relative flex gap-3 pb-4 last:pb-1">
+                      {index < routeOrders.length - 1 && (
+                        <span className="absolute left-[13px] top-7 h-[calc(100%-18px)] w-px bg-[#dfe4e8]" />
+                      )}
+                      <span className="relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-white bg-[#e58b2a] text-xs font-bold text-white shadow-sm">
+                        {index + 1}
+                      </span>
+                      <div className="min-w-0 flex-1 border-b border-[#edf0f2] pb-3 last:border-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="truncate text-sm font-bold text-[#26343f]">{order.title}</p>
+                          <span className="shrink-0 text-xs font-semibold text-[#87929c]">
+                            {formatMinutes(order.minutes)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-[#87929c]">
+                          {order.street}, {order.town}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {routeOrders.length > 0 && (
+                <div className="border-t border-[#edf0f2] px-4 py-3 text-sm text-[#87929c]">
+                  Sortiert nach Ort
+                  <span className="float-right font-bold text-[#26343f]">
+                    {routeOrders.reduce((sum, order) => sum + order.minutes, 0) / 60} Std.
+                  </span>
                 </div>
               )}
             </section>

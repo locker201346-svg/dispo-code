@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { DispoBoard } from "@/components/dispo/DispoBoard";
+import { DispoBoardV2 } from "@/components/dispo/DispoBoardV2";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -25,5 +25,5 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  return <DispoBoard />;
+  return <DispoBoardV2 />;
 }

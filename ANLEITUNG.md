@@ -14,6 +14,15 @@ Die App läuft dann auf http://localhost:8080.
 
 Andere Möglichkeit: `npm install` und `npm run dev`.
 
+Unter Windows PowerShell kann die App auch so gestartet werden:
+
+```
+npm.cmd start
+```
+
+Die TSX-Dateien nicht direkt mit `node` starten. Sie werden vom Vite-Dev-Server
+verarbeitet.
+
 ## Wo was liegt
 
 | Datei | Inhalt |

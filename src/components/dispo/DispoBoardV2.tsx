@@ -45,7 +45,7 @@ import {
 import { INVENTORY, ORDERS, type Order } from "@/data/dispo-data";
 import { demandFor, missingForOrder, shortagesFor, type Shortage } from "@/lib/dispo";
 import { cn } from "@/lib/utils";
-import { ORDER_GEO } from "@/data/dispo-geo";
+import { DEPOT, ORDER_GEO } from "@/data/dispo-geo";
 import { RouteMap, type MapStop } from "@/components/dispo/RouteMap";
 
 const DAY_START = 7 * 60 + 30; // 07:30
@@ -87,6 +87,23 @@ function clock(minutesOfDay: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+function distanceBetween(
+  first: { lat: number; lng: number },
+  second: { lat: number; lng: number },
+): number {
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const earthRadius = 6371;
+  const latDistance = toRadians(second.lat - first.lat);
+  const lngDistance = toRadians(second.lng - first.lng);
+  const a =
+    Math.sin(latDistance / 2) * Math.sin(latDistance / 2) +
+    Math.cos(toRadians(first.lat)) *
+      Math.cos(toRadians(second.lat)) *
+      Math.sin(lngDistance / 2) *
+      Math.sin(lngDistance / 2);
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function readStorage(key: string): string | null {
   try {
     return window.localStorage.getItem(key);
@@ -117,6 +134,7 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
   const [view, setView] = useState<View>("Übersicht");
   const [dark, setDark] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [employeeName, setEmployeeName] = useState("");
 
   // Gespeicherten Plan und Farbmodus erst nach dem ersten Rendern laden (SSR-sicher).
   useEffect(() => {
@@ -288,6 +306,41 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
     setToast("Plan zurückgesetzt");
   }
 
+  function optimizeRoute() {
+    if (plannedOrders.length < 2) {
+      setToast("Mindestens zwei Einsätze für die Optimierung nötig");
+      return;
+    }
+
+    const remaining = [...plannedOrders];
+    let current = DEPOT;
+    const optimized: Order[] = [];
+
+    while (remaining.length > 0) {
+      let nearestIndex = 0;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+
+      remaining.forEach((order, index) => {
+        const geo = ORDER_GEO[order.id];
+        if (!geo) return;
+        const distance = distanceBetween(current, geo);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+
+      const [nearest] = remaining.splice(nearestIndex, 1);
+      if (!nearest) break;
+      optimized.push(nearest);
+      const geo = ORDER_GEO[nearest.id];
+      if (geo) current = geo;
+    }
+
+    setPlannedIds(optimized.map((order) => order.id));
+    setToast("Route nach kürzester Entfernung sortiert");
+  }
+
   const kpis = [
     {
       label: "Eingeplant",
@@ -333,9 +386,19 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
           <CalendarClock className="h-5 w-5 text-muted-foreground" />
           Zeitplan
         </h2>
-        <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
-          {plannedOrders.length}/{ORDERS.length}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={optimizeRoute}
+            disabled={plannedOrders.length < 2}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-bold text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Route optimieren
+          </button>
+          <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
+            {plannedOrders.length}/{ORDERS.length}
+          </span>
+        </div>
       </div>
       <div className="p-3">
         {schedule.length === 0 ? (
@@ -1111,13 +1174,67 @@ export function DispoBoardV2({ v1Href = "/" }: DispoBoardV2Props) {
             )}
 
             {view === "Mitarbeiter" && (
-              <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center">
-                <UserRound className="mx-auto h-10 w-10 text-muted-foreground" />
-                <p className="mt-3 text-lg font-bold">Noch keine Mitarbeiter erfasst</p>
-                <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                  Sobald Mitarbeiterdaten vorhanden sind, können Einsätze hier Personen zugeteilt
-                  werden.
-                </p>
+              <div className="grid items-start gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+                <section className="rounded-xl border border-border bg-card p-5">
+                  <div className="flex items-center gap-2">
+                    <UserRound className="h-5 w-5 text-muted-foreground" />
+                    <h2 className="text-[16px] font-bold">Einsatzteam</h2>
+                  </div>
+                  <label className="mt-4 block">
+                    <span className="mb-1.5 block text-xs font-bold text-muted-foreground">
+                      Mitarbeitername
+                    </span>
+                    <input
+                      value={employeeName}
+                      onChange={(event) => setEmployeeName(event.target.value)}
+                      placeholder="z. B. Marco H."
+                      className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </label>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Der Name wird in der Tagesübersicht für die aktuelle Route verwendet.
+                  </p>
+                </section>
+
+                <section className="overflow-hidden rounded-xl border border-border bg-card">
+                  <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Tagesroute
+                      </p>
+                      <h2 className="mt-1 text-lg font-bold">
+                        {employeeName.trim() || "Mitarbeiter"}
+                      </h2>
+                    </div>
+                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground">
+                      {schedule.length} Einsätze
+                    </span>
+                  </div>
+                  {schedule.length === 0 ? (
+                    <p className="p-8 text-center text-sm text-muted-foreground">
+                      Noch keine Einsätze eingeplant.
+                    </p>
+                  ) : (
+                    <ol className="divide-y divide-border">
+                      {schedule.map(({ order, start, end }, index) => (
+                        <li key={order.id} className="flex items-center gap-3 px-5 py-3">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-brand-foreground">
+                            {index + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-bold">{order.title}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {order.street}, {order.town}
+                            </p>
+                          </div>
+                          <span className="shrink-0 text-right text-xs font-semibold tabular-nums text-muted-foreground">
+                            {clock(start)}–{clock(end)}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
               </div>
             )}
           </div>
